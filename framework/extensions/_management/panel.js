@@ -27,6 +27,7 @@
       button { background: #2a2f38; color: #e6e6e6; border: 1px solid #444; border-radius: 6px;
         padding: 3px 7px; font-size: 11px; cursor: pointer; }
       button:hover { background: #353b46; }
+      button:disabled { opacity: .4; cursor: not-allowed; }
       button.danger { color: #ff8b8b; border-color: #5a2a2a; }
       .err { color: #ff8b8b; font-size: 11px; white-space: pre-wrap; }
       .toolbar { display: flex; gap: 6px; margin: 8px 0; }
@@ -34,9 +35,10 @@
     <div id="ew-panel">
       <h2>electron-webext <span style="font-size:11px;color:#888" id="ew-count"></span></h2>
       <div class="toolbar">
-        <button id="ew-load">Load unpacked…</button>
+        <button id="ew-disable-all" title="Disable every non-builtin extension (one reload)">Disable all</button>
+        <button id="ew-enable-all" title="Re-enable every non-builtin extension (one reload)">Enable all</button>
         <button id="ew-reload-all">Reload all</button>
-        <button id="ew-open-page">Open full page</button>
+        <button id="ew-open-page">Full page</button>
       </div>
       <div id="ew-list"></div>
       <div id="ew-errors"></div>
@@ -50,11 +52,15 @@
   const errs = root.querySelector("#ew-errors");
 
   function toggle(open) {
-    panel.classList.toggle("open", open ?? !panel.classList.contains("open"));
-    if (panel.classList.contains("open")) refresh();
+    const willOpen = open ?? !panel.classList.contains("open");
+    panel.classList.toggle("open", willOpen);
+    if (willOpen) refresh();
+    try { chrome.storage.local.set({ ewPanelOpen: willOpen }); } catch {}
   }
   // The host routes the `_toggle_panel` command to a global we expose.
   window.__ewToggleManagementPanel = () => toggle();
+  // reopen after reload if it was open before
+  (async () => { try { const s = await chrome.storage.local.get("ewPanelOpen"); if (s.ewPanelOpen) toggle(true); } catch {} })();
 
   async function refresh() {
     const exts = await chrome.management.getAll();
@@ -66,25 +72,23 @@
       row.innerHTML = `<span class="name">${e.name}</span><span class="ver">${e.version}</span>`;
       const t = document.createElement("button");
       t.textContent = e.enabled ? "on" : "off";
-      t.onclick = async () => { await chrome.management.setEnabled(e.id, !e.enabled); refresh(); };
+      if (!e.mayDisable) { t.disabled = true; t.title = "built-in: cannot be disabled"; }
+      else t.onclick = async () => { try { await chrome.management.setEnabled(e.id, !e.enabled); } catch (err) { console.warn("setEnabled:", err.message); } refresh(); };
       const r = document.createElement("button");
       r.textContent = "reload";
       r.onclick = async () => { await chrome.management.reload(e.id); refresh(); };
       const u = document.createElement("button");
       u.className = "danger";
       u.textContent = "uninstall";
-      u.onclick = async () => { await chrome.management.uninstall(e.id); refresh(); };
+      if (!e.mayDisable) { u.disabled = true; u.title = "built-in: cannot be uninstalled"; }
+      else u.onclick = async () => { try { await chrome.management.uninstall(e.id); } catch (err) { console.warn("uninstall:", err.message); } refresh(); };
       row.append(t, r, u);
       list.appendChild(row);
     }
   }
 
-  root.querySelector("#ew-load").onclick = async () => {
-    // Host intercepts the file chooser (Page.setInterceptFileChooserDialog) and
-    // resolves a folder path; management.install(path) loads it.
-    const path = await chrome.management.loadUnpacked();
-    if (path) refresh();
-  };
+  root.querySelector("#ew-disable-all").onclick = async () => { await chrome.management.setEnabledAll(false); };
+  root.querySelector("#ew-enable-all").onclick = async () => { await chrome.management.setEnabledAll(true); };
   root.querySelector("#ew-reload-all").onclick = async () => {
     const exts = await chrome.management.getAll();
     await Promise.all(exts.map(e => e.id !== "_management" && chrome.management.reload(e.id)));

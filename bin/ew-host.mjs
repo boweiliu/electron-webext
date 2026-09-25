@@ -224,11 +224,21 @@ const backends = {
     getSelf: (ctx) => info(registry.get(ctx.extId)),
     setEnabled: async (_ctx, [id, en]) => {
       const e = registry.get(id); if (!e) throw new Error('no such extension');
+      if (e.builtin && !en) throw new Error('cannot disable built-in extension: ' + id);
       e.enabled = en;
       emit(en ? 'management.onEnabled' : 'management.onDisabled', { id, enabled: en });
       await reinjectAll();
     },
+    // batch toggle: set every non-builtin extension, then a single reinject (one reload)
+    setEnabledAll: async (_ctx, [en]) => {
+      for (const e of registry.values()) if (!e.builtin) e.enabled = en;
+      emit(en ? 'management.onEnabled' : 'management.onDisabled', { all: true, enabled: en });
+      await reinjectAll();
+      return [...registry.values()].map(x => ({ id: x.id, enabled: x.enabled }));
+    },
     uninstall: async (_ctx, [id]) => {
+      const e = registry.get(id);
+      if (e?.builtin) throw new Error('cannot uninstall built-in extension: ' + id);
       registry.delete(id);
       emit('management.onUninstalled', { id });
       await reinjectAll();

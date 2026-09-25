@@ -55,7 +55,7 @@
   const c = window.chrome;
 
   c.management = Object.assign(
-    ns('management', ['getAll', 'get', 'getSelf', 'setEnabled', 'uninstall', 'loadUnpacked', 'reload', 'getPermissionWarnings']),
+    ns('management', ['getAll', 'get', 'getSelf', 'setEnabled', 'setEnabledAll', 'uninstall', 'loadUnpacked', 'reload', 'getPermissionWarnings']),
     {
       onInstalled: makeEvent('management.onInstalled'),
       onUninstalled: makeEvent('management.onUninstalled'),
