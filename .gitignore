@@ -1,6 +1,8 @@
 node_modules/
 host.out
 host.pid
+host-*.out
+host-*.pid
 debug-build.js
 *.png
 *.log
