@@ -1,0 +1,22 @@
+{
+  "name": "electron-webext",
+  "version": "0.1.0",
+  "description": "Run standard web extensions (Chrome MV3 / WebExtensions API) inside installed Electron desktop apps via the --remote-debugging-port CDP channel.",
+  "type": "module",
+  "bin": {
+    "ew-host": "bin/ew-host.mjs",
+    "hotmod": "bin/hotmod.mjs"
+  },
+  "scripts": {
+    "start": "node bin/ew-host.mjs --port 9222 --match slack.com",
+    "hotmod": "node bin/hotmod.mjs --port 9222 --src ext-src --match slack.com"
+  },
+  "keywords": [
+    "electron", "chrome-extensions", "webextensions", "mv3",
+    "chrome-devtools-protocol", "cdp", "slack", "hot-reload", "web-ext"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "chrome-remote-interface": "^0.33.0"
+  }
+}

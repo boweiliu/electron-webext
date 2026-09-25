@@ -1,0 +1,63 @@
+<!doctype html>
+<!-- management.html — full-page chrome://extensions-style UI.
+     Served by the host's localhost HTTP server at http://localhost:<port>/manage
+     and also reachable via chrome.runtime.getURL("management.html") from the
+     injected panel. Connects to the host over WS and uses the same chrome.* shim. -->
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>electron-webext · Extensions</title>
+  <style>
+    body { font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 24px; color: #222; }
+    h1 { font-size: 18px; }
+    .ext { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin: 8px 0; display: flex; align-items: center; gap: 10px; }
+    .name { flex: 1; font-weight: 600; } .ver { color: #888; }
+    button { padding: 4px 10px; border-radius: 6px; border: 1px solid #bbb; background: #fff; cursor: pointer; }
+    button.danger { color: #c00; border-color: #e6bcbc; }
+    .toolbar { margin: 12px 0; display: flex; gap: 8px; }
+    #errors { white-space: pre-wrap; color: #c00; font-family: ui-monospace, monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>electron-webext · Extensions</h1>
+  <div class="toolbar">
+    <button id="load">Load unpacked…</button>
+    <button id="reload-all">Reload all</button>
+  </div>
+  <div id="list"></div>
+  <h3>Errors</h3>
+  <div id="errors"></div>
+
+  <!-- In the real host, this page is served with a bootstrap that injects the
+       chrome.* shim wired to a WS transport instead of the CDP binding. -->
+  <script>
+    const list = document.getElementById("list");
+    const errors = document.getElementById("errors");
+    async function refresh() {
+      const exts = await chrome.management.getAll();
+      list.innerHTML = "";
+      for (const e of exts) {
+        const row = document.createElement("div"); row.className = "ext";
+        row.innerHTML = `<span class="name">${e.name}</span><span class="ver">${e.version}</span>`;
+        const t = document.createElement("button"); t.textContent = e.enabled ? "Enabled" : "Disabled";
+        t.onclick = async () => { await chrome.management.setEnabled(e.id, !e.enabled); refresh(); };
+        const r = document.createElement("button"); r.textContent = "Reload";
+        r.onclick = async () => { await chrome.management.reload(e.id); refresh(); };
+        const u = document.createElement("button"); u.className = "danger"; u.textContent = "Uninstall";
+        u.onclick = async () => { await chrome.management.uninstall(e.id); refresh(); };
+        row.append(t, r, u); list.appendChild(row);
+      }
+    }
+    document.getElementById("load").onclick = async () => {
+      const p = await chrome.management.loadUnpacked(); if (p) refresh();
+    };
+    document.getElementById("reload-all").onclick = async () => {
+      const exts = await chrome.management.getAll();
+      await Promise.all(exts.map(e => e.id !== "_management" && chrome.management.reload(e.id)));
+      refresh();
+    };
+    chrome.management.onErrors?.addListener((id, msgs) => { errors.textContent += `[${id}] ${msgs.join("\n")}\n`; });
+    refresh();
+  </script>
+</body>
+</html>

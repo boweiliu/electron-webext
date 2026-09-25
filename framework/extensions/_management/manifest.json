@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "electron-webext Management",
+  "version": "0.1.0",
+  "description": "Built-in extensions management UI for electron-webext. Auto-loaded by the host.",
+  "permissions": ["management", "runtime", "storage", "commands"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["toolbar.js", "panel.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle",
+      "world": "main",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "electron-webext Management",
+    "default_popup": "management.html"
+  },
+  "web_accessible_resources": [
+    { "resources": ["management.html", "panel.css"], "matches": ["<all_urls>"] }
+  ],
+  "commands": {
+    "_toggle_panel": { "suggested_key": { "default": "Ctrl+Shift+E", "mac": "Command+Shift+E" }, "description": "Toggle the extensions management panel" }
+  }
+}

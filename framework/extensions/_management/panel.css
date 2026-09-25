@@ -1,0 +1,4 @@
+/* panel.css — kept minimal; the real styles live in the closed shadow DOM in panel.js
+   so the host app's CSS can't leak in. This file exists so the manifest content_scripts
+   "css" entry is valid and so we can ship a non-shadow fallback later. */
+#ew-management-host { position: fixed; z-index: 2147483647; }
