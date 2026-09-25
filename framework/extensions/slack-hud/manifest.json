@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Slack HUD",
+  "version": "0.2.0",
+  "description": "Demo: a floating overlay (live channel + workspace + clock) with a Night Mode toggle that re-themes the real Slack UI via CSS injection. Exercises isolated world, DOM access, chrome.storage.local, chrome.runtime.sendMessage, and visible page mutation.",
+  "permissions": ["storage", "runtime"],
+  "content_scripts": [
+    { "matches": ["https://app.slack.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}

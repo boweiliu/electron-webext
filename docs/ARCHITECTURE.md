@@ -32,6 +32,7 @@ framework/
       manifest.json
       content.js
     action-logger/         POC #2: isolated-world content script — action.onClicked, management.getAll, tabs.query, onMessage, storage.onChanged
+    slack-hud/            DEMO: floating overlay (live channel + workspace + clock) + Night Mode toggle that re-themes the real Slack UI via CSS injection
 docs/
   RESEARCH.md             prior art, live CDP findings, standardized surface, architecture
   MANAGEMENT.md           the management UI design
@@ -64,6 +65,10 @@ docs/
     click it calls `chrome.management.getAll` + `chrome.tabs.query` +
     `chrome.storage.local`, and receives `onMessage` / `storage.onChanged` /
     `action.onClicked`.
+  - `slack-hud` — **demo**: a floating overlay (closed shadow DOM) showing the
+    live channel + workspace + clock, with a Night Mode toggle that injects a
+    `<style>` into the page head to re-theme the real Slack UI
+    (`body { filter: invert(1) hue-rotate(180deg) }`). Visibly mutates the page.
 
 ## Debug verification (how we prove the running code is the latest)
 Every generated source is stamped with an FNV-1a hash. Three places must agree:
