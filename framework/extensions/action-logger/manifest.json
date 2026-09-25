@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Action Logger",
+  "version": "0.1.0",
+  "description": "POC #2: has a toolbar action. On click it calls chrome.management.getAll + chrome.tabs.query + chrome.storage.local and logs. Also listens to chrome.runtime.onMessage and chrome.storage.onChanged. Exercises: action.onClicked, management.getAll, tabs.query, storage, runtime.onMessage, storage.onChanged — all received in an isolated world.",
+  "permissions": ["management", "tabs", "storage", "runtime", "action"],
+  "action": { "default_title": "Action Logger — click me" },
+  "content_scripts": [
+    { "matches": ["https://app.slack.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}

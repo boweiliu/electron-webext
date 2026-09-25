@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Slack Channel Info",
+  "version": "0.1.0",
+  "description": "POC #1: runs in an ISOLATED world, reads the current Slack channel from the page DOM, stores it in chrome.storage.local, broadcasts via chrome.runtime.sendMessage, and queries chrome.tabs. Exercises: isolated world, DOM access, storage, runtime.sendMessage, tabs.query, runtime.getManifest/getId.",
+  "permissions": ["storage", "runtime", "tabs"],
+  "content_scripts": [
+    { "matches": ["https://app.slack.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}

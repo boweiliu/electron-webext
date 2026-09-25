@@ -22,7 +22,7 @@
       const id = ++callId;
       pending.set(id, { resolve, reject });
       try {
-        window.__ewSend(JSON.stringify({ callId: id, api, method, args: args || [] }));
+        window.__ewSend(JSON.stringify({ callId: id, extId: window.__ewSelfId || '_management', api, method, args: args || [] }));
       } catch (e) {
         pending.delete(id);
         reject(new Error('bridge unavailable: ' + e.message));
@@ -65,8 +65,12 @@
     }
   );
   c.runtime = Object.assign(
-    ns('runtime', ['getURL', 'getManifest', 'sendMessage', 'connect', 'reload', 'getInfo', 'getId', 'getSelf']),
+    ns('runtime', ['sendMessage', 'connect', 'reload', 'getInfo', 'getSelf']),
     {
+      // synchronous in real Chrome — backed by injected __ewSelfInfo, not the bridge
+      getId: () => window.__ewSelfInfo?.id,
+      getManifest: () => window.__ewSelfInfo?.manifest,
+      getURL: (p) => 'chrome-extension://' + (window.__ewSelfInfo?.id) + '/' + String(p || '').replace(/^\/+/, ''),
       onMessage: makeEvent('runtime.onMessage'),
       onConnect: makeEvent('runtime.onConnect'),
       onInstalled: makeEvent('runtime.onInstalled'),
@@ -89,7 +93,7 @@
   };
   c.tabs = ns('tabs', ['query', 'get', 'getCurrent', 'sendMessage', 'executeScript', 'insertCSS', 'reload', 'create', 'update', 'remove']);
   c.commands = { onCommand: makeEvent('commands.onCommand'), getAll: (...a) => call('commands', 'getAll', a) };
-  c.i18n = { getMessage: (n, ...a) => call('i18n', 'getMessage', [n, ...a]) };
+  c.i18n = { getMessage: (n) => n }; // synchronous
   c.windows = ns('windows', ['getCurrent', 'getAll', 'create', 'update', 'remove']);
 
   // host hooks used by toolbar/panel

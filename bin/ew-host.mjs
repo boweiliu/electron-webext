@@ -104,8 +104,8 @@ function contentScriptsFor(ext) {
 }
 
 function buildSource(ext) {
-  // prelude sets the "self" extension id for this content script group
-  const parts = [`window.__ewSelfId = ${JSON.stringify(ext.id)};`];
+  // content scripts only (shim + self-id are prepended per-world by buildAll)
+  const parts = [];
   // css first
   for (const cs of (ext.manifest.content_scripts || [])) {
     for (const cssf of (cs.css || [])) {
@@ -130,17 +130,24 @@ function buildSource(ext) {
   return parts.join('\n');
 }
 
-function fullInjectionSource() {
-  // shim once, then each enabled extension's content scripts
-  const parts = [SHIM];
+// world for an extension: undefined = main world; otherwise an isolated world name
+function extensionWorld(ext) {
+  const css = ext.manifest.content_scripts || [];
+  return css.some(cs => cs.world === 'main') ? undefined : `ew:${ext.id}`;
+}
+
+// build per-extension injection entries (self-id + shim + that extension's content scripts)
+function buildAll() {
+  const entries = [];
   for (const ext of registry.values()) {
     if (!ext.enabled) continue;
-    parts.push(buildSource(ext));
+    const worldName = extensionWorld(ext);
+    const body = `window.__ewSelfId=${JSON.stringify(ext.id)};window.__ewSelfInfo=${JSON.stringify({ id: ext.id, manifest: ext.manifest })};\n` + SHIM + '\n' + buildSource(ext);
+    entries.push({ ext, worldName, body });
   }
-  const body = parts.join('\n');
-  const h = shortHash(body);
-  // stamp the build so the page can report which version is actually running
-  return { source: `window.__ewBuild=${JSON.stringify(h)};\n` + body, hash: h };
+  const hash = shortHash(entries.map(e => e.body).join('\n'));
+  for (const e of entries) e.source = `window.__ewBuild=${JSON.stringify(hash)};\n` + e.body; // stamp build
+  return { entries, hash };
 }
 
 async function attachTarget(t) {
@@ -152,6 +159,11 @@ async function attachTarget(t) {
   const { Page, Runtime, Network } = client;
   await Runtime.enable();
   await Page.enable();
+  // track every execution context (main + isolated worlds) so emit() can reach all of them
+  const contexts = new Map(); // ctxId -> {name}
+  Runtime.executionContextCreated(({ context }) => { contexts.set(context.id, { name: context.name }); });
+  Runtime.executionContextDestroyed(({ executionContextId }) => contexts.delete(executionContextId));
+  Runtime.executionContextsCleared(() => contexts.clear());
   // bridge binding
   await Runtime.addBinding({ name: '__ewSend' });
   Runtime.bindingCalled(({ name, payload, executionContextId }) => {
@@ -161,21 +173,25 @@ async function attachTarget(t) {
   Runtime.exceptionThrown(({ exceptionDetails }) => {
     err('page exception:', exceptionDetails?.text, exceptionDetails?.exception?.description?.slice(0, 300));
   });
-  // inject
-  const { source, hash } = fullInjectionSource();
-  checkSource(source, hash);
-  const { identifier } = await Page.addScriptToEvaluateOnNewDocument({ source, runImmediately: true });
-  attached.set(t.id, { client, scriptIds: new Set([identifier]), extIds: new Set([...registry.keys()]), buildHash: hash });
+  // inject each enabled extension into its own world (main world if manifest says world:main)
+  const { entries, hash } = buildAll();
+  const scriptIds = new Set();
+  for (const e of entries) {
+    checkSource(e.source, hash + ':' + e.ext.id);
+    const { identifier } = await Page.addScriptToEvaluateOnNewDocument({ source: e.source, worldName: e.worldName, runImmediately: true });
+    scriptIds.add(identifier);
+    dbg('inject build=' + hash, e.ext.id, '-> world', e.worldName || 'main', e.source.length + 'B', 'scriptId', identifier);
+  }
+  attached.set(t.id, { client, scriptIds, buildHash: hash, contexts });
   targets.set(t.id, { id: t.id, url: t.url, title: t.title });
-  dbg('inject build=' + hash, source.length, 'bytes into', t.id, '(scriptId', identifier + ')');
 }
 
 async function handleCall(payload, targetId, executionContextId) {
   let req;
   try { req = JSON.parse(payload); } catch (e) { err('bad payload', payload); return; }
-  const { callId, api, method, args } = req;
-  const ctx = { extId: '_management', targetId, executionContextId }; // single-ext slice; TODO per-ext isolated world
-  dbg('call', api + '.' + method, 'from target', targetId, 'ctx', executionContextId, 'callId', callId);
+  const { callId, extId, api, method, args } = req;
+  const ctx = { extId: extId || '_management', targetId, executionContextId };
+  dbg('call', api + '.' + method, 'from', ctx.extId, '@target', targetId, 'ctx', executionContextId, 'callId', callId);
   let result, isError = false;
   try {
     const fn = backends[api] && backends[api][method];
@@ -190,11 +206,13 @@ async function handleCall(payload, targetId, executionContextId) {
   catch (e) { err('resolve failed', e.message, '(retrying default context)'); try { await client.Runtime.evaluate({ expression: expr }); } catch {} }
 }
 
-// broadcast an event to all attached targets
+// broadcast an event to every execution context of every attached target (main + all isolated worlds)
 async function emit(name, payload) {
   const expr = `window.__ewEmit && window.__ewEmit(${JSON.stringify(name)}, ${JSON.stringify(payload)});`;
   for (const [tid, a] of attached) {
-    try { await a.client.Runtime.evaluate({ expression: expr }); } catch {}
+    for (const ctxId of [...(a.contexts?.keys() || [])]) {
+      try { await a.client.Runtime.evaluate({ expression: expr, contextId: ctxId }); } catch {}
+    }
   }
 }
 
@@ -265,18 +283,19 @@ const backends = {
 
 // ---------- reinject (hot reload / enable-disable) ----------
 async function reinjectAll() {
-  const { source, hash } = fullInjectionSource();
+  const { entries, hash } = buildAll();
   for (const [tid, a] of attached) {
-    // remove ALL previously registered scripts (avoid stale-script accumulation)
     for (const id of a.scriptIds) {
       try { await a.client.Page.removeScriptToEvaluateOnNewDocument({ identifier: id }); } catch {}
     }
     a.scriptIds.clear();
-    const { identifier } = await a.client.Page.addScriptToEvaluateOnNewDocument({ source, runImmediately: true });
-    a.scriptIds.add(identifier);
+    for (const e of entries) {
+      checkSource(e.source, hash + ':' + e.ext.id);
+      const { identifier } = await a.client.Page.addScriptToEvaluateOnNewDocument({ source: e.source, worldName: e.worldName, runImmediately: true });
+      a.scriptIds.add(identifier);
+      dbg('reinject build=' + hash, e.ext.id, '-> world', e.worldName || 'main', 'scriptId', identifier);
+    }
     a.buildHash = hash;
-    checkSource(source, hash);
-    dbg('reinject build=' + hash, source.length, 'bytes ->', tid, '(scriptId', identifier + ')');
     if (AUTORELOAD) { try { await a.client.Page.reload(); dbg('autoreload ->', tid); } catch (e) { err('autoreload failed', tid, e.message); } }
   }
 }
@@ -301,19 +320,23 @@ async function discover() {
 // ---------- hot reload ----------
 function watch() {
   let t;
-  fs.watch(path.join(EXT_DIR, '_management'), { recursive: true }, (_e, f) => {
-    if (!f) return;
-    clearTimeout(t); t = setTimeout(async () => { dbg('change:', f, '-> reinject'); await reinjectAll(); }, 200);
-  });
-  fs.watch(path.join(ROOT, 'framework', 'host', 'shim.js'), () => {
-    clearTimeout(t); t = setTimeout(async () => { dbg('shim changed -> reinject'); await reinjectAll(); }, 200);
-  });
+  const onChange = (_e, f) => { if (!f) return; clearTimeout(t); t = setTimeout(async () => { dbg('change:', f, '-> reinject'); await reinjectAll(); }, 200); };
+  // watch every extension dir + the shim
+  for (const ext of registry.values()) {
+    fs.watch(ext.path, { recursive: true }, onChange);
+  }
+  fs.watch(path.join(ROOT, 'framework', 'host', 'shim.js'), onChange);
 }
 
 // ---------- main ----------
 async function main() {
-  // auto-load built-in management extension
-  loadExtension(path.join(EXT_DIR, '_management'), true);
+  // auto-load every extension under framework/extensions/ (builtin = _management)
+  for (const name of fs.readdirSync(EXT_DIR).sort()) {
+    const dir = path.join(EXT_DIR, name);
+    if (fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'manifest.json'))) {
+      loadExtension(dir, name === '_management');
+    }
+  }
   dbg('host starting; CDP port', PORT, 'match', MATCH || '(all)', 'autoreload', AUTORELOAD);
   // initial discover
   for (let i = 0; i < 30; i++) {

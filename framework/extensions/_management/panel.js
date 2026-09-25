@@ -114,8 +114,8 @@
 
   // Hooks called by the toolbar when an extension action is clicked.
   window.__ewFireAction = (extId) => {
-    // host routes to the extension's background chrome.action.onClicked
-    chrome.runtime.sendMessage("_management", { __ew: true, type: "actionClicked", extId });
+    // fire chrome.action.onClicked for that extension (host emits to all worlds)
+    window.__ewHost?.fireAction(extId);
   };
   window.__ewOpenPopup = (extId, popupPath) => {
     // Open the extension's default_popup in a small shadow-DOM popover iframe.

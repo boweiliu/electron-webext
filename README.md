@@ -30,13 +30,13 @@ access to the app's real DOM, cookies, and network.
  │   • chrome.* shim   (injected into the page; calls back over a binding)   │
  │   • backends        (management, runtime, storage, tabs, action, …)      │
  │   • hot reload      (fs.watch → reinject → autoreload, with build hashes) │
- └──────────▲───────────────────────────────────────────────────────────────┘
+ └──────────▲────────────────────────────────────────────────────────────────┘
             │ Runtime.bindingCalled (page→host)        Runtime.evaluate (host→page)
             │
- ┌──────────┴───────────────────────────────────────────────────────────────┐
- │  Your extension's content scripts  (window.chrome.*)                      │
- │   + the built-in _management extension (toolbar + extensions panel)       │
- └───────────────────────────────────────────────────────────────────────────┘
+ ┌──────────┴────────────────────────────────────────────────────────────────┐
+ │  Your extension's content scripts  (window.chrome.*)                        │
+ │   + the built-in _management extension (toolbar + extensions panel)         │
+ └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 The native CDP `Extensions.loadUnpacked` domain is **not exposed by Electron**
@@ -72,86 +72,10 @@ Quit Slack and close the port with:
 pkill -f "Slack.app/Contents/MacOS/Slack"
 ```
 
-### Options
-| flag | default | description |
-|---|---|---|
-| `--port` | `9222` | CDP port the app was launched with |
-| `--match` | (all) | only attach to targets whose URL/title contains this string |
-| `--no-autoreload` | off | disable auto-reload of the target after a reinject |
-| `--verbose` | on | verbose host logging |
+See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for options, project layout,
+the implemented API surface, the debug-verification procedure, why-not-the-obvious
+alternatives, and the roadmap. Verification against the real Slack.app is in
+[docs/PROGRESS.md](docs/PROGRESS.md); prior art + CDP findings are in
+[docs/RESEARCH.md](docs/RESEARCH.md).
 
-## Project layout
-```
-bin/
-  ew-host.mjs            the host runtime (CDP target manager, injector, bridge, backends)
-  hotmod.mjs              minimal standalone CDP hot-mod injector (the original proof of concept)
-framework/
-  host/
-    shim.js               chrome.*/browser.* shim injected into each target (over the CDP binding)
-    api/
-      management.js       chrome.management backend (spec/skeleton)
-  extensions/
-    _management/          built-in first-party extension: toolbar + management panel + full-page UI
-      manifest.json
-      toolbar.js
-      panel.js
-      management.html
-docs/
-  RESEARCH.md             prior art, live CDP findings, standardized surface, architecture
-  MANAGEMENT.md           the management UI design
-  PROGRESS.md             step-by-step verification against the real Slack.app
-```
-
-## What's implemented (working slice)
-- **Host**: CDP target discovery, per-target attach, `Page.addScriptToEvaluateOnNewDocument`
-  injection (respects `run_at`), `Runtime.addBinding` bridge, in-process backends,
-  hot reload with **build hashing + `node --check`** so stale or malformed code can
-  never ship silently.
-- **`chrome.*` shim** (Promise-based, MV3): `management`, `runtime`, `storage`
-  (local/session/sync), `action`, `tabs`, `commands`, `i18n`, `windows`, plus an
-  event system (`onInstalled`, `onMessage`, …).
-- **Backends**: `chrome.management` (getAll/get/getSelf/setEnabled/uninstall/
-  loadUnpacked/reload), `chrome.runtime` (getURL/getManifest/getId/sendMessage),
-  `chrome.storage.local` (in-memory per extension), `chrome.tabs` (query/get/
-  sendMessage/reload/executeScript), `chrome.action.onClicked`.
-- **Built-in `_management` extension**: injected top toolbar + management panel +
-  full-page `chrome://extensions`-style UI. It's just a normal client of
-  `chrome.management` — not special-cased — so third-party extensions can build
-  their own managers too.
-
-## Debug verification (how we prove the running code is the latest)
-Every generated source is stamped with an FNV-1a hash. Three places must agree:
-1. host log: `inject build=<hash>` / `reinject build=<hash>`
-2. page console: `[ew] shim init build=<hash>`
-3. `window.__ewBuild` (query via CDP)
-
-On every inject the host also writes the generated source to `debug-build.js` and
-runs `node --check` on it (`node --check OK for build=<hash>`). With `--autoreload`
-(default), editing any extension file reloads the target so the new build is live
-immediately.
-
-## Why not the obvious paths
-- **Mozilla `web-ext` / temporary extensions** — Firefox-only; Electron is Chromium.
-- **Chrome MV3 unpacked extensions / `--load-extension`** — Electron disables
-  Chromium's extension subsystem; `session.loadExtension` needs the app author.
-- **CDP `Extensions.loadUnpacked`** — exists in upstream Chromium CDP but **not
-  exposed by Electron** (`'Extensions.loadUnpacked' wasn't found`). So we polyfill.
-
-## Status & roadmap
-**Working:** toolbar + management panel render in the real Slack.app;
-`chrome.management`/`storage`/`tabs` resolve; hot reload; build-hash verification;
-click-through toolbar; stable pins.
-
-**TODO (in rough priority order):**
-- per-extension isolated worlds (currently single-extension; `extId=_management`)
-- `chrome.cookies` backed by CDP `Network` on the app's real cookie jar
-- `chrome.declarativeNetRequest` / `webRequest` backed by CDP `Fetch`
-- background service worker (Node Worker) + `chrome.runtime` messaging between
-  background and content scripts
-- "Load unpacked…" folder picker in the management panel
-- persistent `chrome.storage` (currently in-memory; lost on host restart)
-- `all_frames` / iframe targeting, multi-window auto-attach
-- sample POC extensions that exercise the API surface
-
-## License
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
