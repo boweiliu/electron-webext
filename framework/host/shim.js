@@ -96,6 +96,9 @@
   c.i18n = { getMessage: (n) => n }; // synchronous
   c.windows = ns('windows', ['getCurrent', 'getAll', 'create', 'update', 'remove']);
 
+  // discord bridge (host-side via latchkey) — token never reaches the page
+  c.discord = ns('discord', ['status', 'me', 'listDMs', 'messages', 'send']);
+
   // host hooks used by toolbar/panel
   window.__ewHost = {
     getPopupURL: (extId, p) => call('runtime', 'getURL', [extId, p]),

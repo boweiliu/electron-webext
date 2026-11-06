@@ -7,3 +7,4 @@ debug-build.js
 *.png
 *.log
 .DS_Store
+node_modules
