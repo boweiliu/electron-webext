@@ -12,14 +12,26 @@ CDP injection (no iframe, no cookie theft, no app repackaging).
 
 - **Sidebar:** injects a "discord - alice" row as the first channel under the
   `bowei` sidebar section. It's a clone of a real channel row (so it inherits
-  Slack's exact styling), renamed and re-stamped with our own `data-qa`.
+  Slack's exact styling), renamed and re-stamped with our own `data-qa`. Idle by
+  default; clicking it toggles `--selected` (aubergine purple #7d3986) and
+  deselects the previously-active real channel. Right-click shows a Slack-style
+  context menu (copy link / mute / mark read / leave).
 - **Message pane:** clicking the fake row overlays a closed-shadow-DOM panel
-  over the message area with a fake conversation (Alice + Bowei). The composer
-  accepts input and appends it to the thread (demo only — not wired to anything).
-  Clicking a real channel, or the × button, hides the overlay.
+  over the message area that mimics a real aubergine-dark Slack channel view:
+  - **header** (`# discord - alice` + active presence + member count)
+  - **message kit** — 36px avatars (the real self avatar is reused for "me"
+    messages, so they look pixel-identical; Alice gets a Slack-colored initial
+    circle), colored bold sender names + 12px timestamp, 15px/22px body text,
+    same-sender grouping (continuation rows hide the avatar/name), date divider,
+    and a hover action bar (😊 ↪ 🔖 ⋯) like Slack's.
+  - **composer** — rounded `.c-wysiwyg_container` look (bg #222529, border #565856),
+    focus ring, `Message discord - alice` placeholder, Enter to send (appends a
+    real-looking "me" message), Shift+Enter for newline.
+  - clicking a real channel, or the × button, hides the overlay and deselects.
 - **Harness hooks:** `window.__ewInbox` (in the extension's isolated world)
-  exposes `.capture() / .show() / .hide() / .toggle()` so an e2e/dev harness can
-  read the rendered HTML + structured conversation and drive the overlay.
+  exposes `.capture() / .show() / .hide() / .toggle() / .select() / .deselect()`
+  so an e2e/dev harness can read the rendered HTML + structured conversation and
+  drive the overlay.
 
 ## How it survives Slack's React virtualized sidebar
 
@@ -56,15 +68,14 @@ You should see "discord - alice" under your bowei section. Click it.
 # DOM-level check from the page main world:
 node bin/eval.mjs '() => !!document.querySelector("[data-ew=\"ew-inbox-fake\"]")'
 
-# read the harness hook from the extension's isolated world:
-node bin/eval.mjs '() => window.__ewInbox.capture()' --world ew:ew1629tr5
+# read the harness hook from the extension's isolated world
+# (the world name is logged by the host at inject time, e.g.
+#  inject build=<hash> ewXXXX -> world ew:ewXXXX):
+node bin/eval.mjs '() => window.__ewInbox.capture()' --world ew:ewXXXX
 
 # screenshot the rendered Slack window:
 node bin/screenshot.mjs /tmp/slack-inbox.png
 ```
-
-(The `--world` name is logged by the host at inject time, e.g.
-`inject build=<hash> ew1629tr5 -> world ew:ew1629tr5`.)
 
 ## Next
 
