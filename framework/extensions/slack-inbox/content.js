@@ -36,7 +36,7 @@
   const SECTION_ID = 'L086AD6NLHZ';        // the "bowei" sidebar section heading
   const FAKE_MARK = 'ew-inbox-fake';        // data-ew attr marking our rows
   const ROW_H = 28;                         // px, Slack sidebar row height
-  const MAX_ROWS = 8;                       // cap on injected discord rows
+  const MAX_ROWS = 14;                      // cap on injected discord rows (bumped from 8 so bot DMs like Carl-bot surface)
   const POLL_MS = 6000;                     // live refresh of the open thread
   const MSG_LIMIT = 50;
   const FAKE_QA = 'channel_sidebar_name_discord';
@@ -303,11 +303,17 @@
           padding:4px 6px; border-radius:4px; font-size:14px; }
         .actions button:hover { background:${C.rowHoverSidebar}; color:${C.text}; }
         .composer { flex:0 0 auto; padding:0 18px 18px; }
-        .box { background:${C.composerBg}; border:1px solid ${C.composerBorder}; border-radius:8px;
+        .composer-row { display:flex; gap:8px; align-items:flex-end; }
+        .box { flex:1; background:${C.composerBg}; border:1px solid ${C.composerBorder}; border-radius:8px;
           padding:8px 12px; transition:border-color .12s; }
         .box.focus { border-color:${C.composerFocus}; }
         .box[contenteditable] { min-height:24px; max-height:160px; overflow-y:auto; outline:none; color:${C.text}; font:15px/1.4 ${FONT}; }
         .box[contenteditable]:empty:before { content:attr(data-placeholder); color:${C.idleText}; }
+        .send { flex:0 0 auto; width:36px; height:36px; border-radius:8px; border:none; cursor:pointer;
+          background:${C.composerBg}; color:${C.idleText}; font-size:16px; line-height:1;
+          display:flex; align-items:center; justify-content:center; transition:background .12s,color .12s; }
+        .send:hover { background:#3a3d41; color:${C.text}; }
+        .send:disabled { opacity:.4; cursor:default; }
         .foot { display:flex; align-items:center; gap:10px; padding:6px 2px 0; color:${C.idleText}; font-size:12px; }
         .foot kbd { background:#2a2d31; border:1px solid #3a3a3a; border-radius:3px; padding:0 4px; font:11px ui-monospace; }
       </style>
@@ -320,17 +326,35 @@
         </div>
         <div class="stream" id="stream"><div id="msgs"></div></div>
         <div class="composer">
-          <div class="box" id="box" contenteditable="true" data-placeholder="Message …"></div>
+          <div class="composer-row">
+            <div class="box" id="box" contenteditable="true" data-placeholder="Message …"></div>
+            <button class="send" id="send" title="Send (Enter)" aria-label="Send">➤</button>
+          </div>
           <div class="foot"><span>press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for newline</span><span style="margin-left:auto" id="footSrc">slack-inbox spike</span></div>
         </div>
       </div>`;
     document.documentElement.appendChild(state.overlayHost);
     const box = state.shadow.getElementById('box');
+    const doSend = () => { const text = box.textContent.trim(); if (!text) return; sendCurrent(text); box.textContent = ''; };
     box.addEventListener('focus', () => box.classList.add('focus'));
     box.addEventListener('blur', () => box.classList.remove('focus'));
+    // The composer lives in a closed shadow DOM. Slack's global shortcut handlers
+    // sit on document/window and see our overlay div as the active element (not
+    // their own input), so they'd swallow keystrokes before typing can happen.
+    // Stop these events from propagating out of the composer so Slack never sees
+    // them; the browser's default (typing) is unaffected because we don't
+    // preventDefault (except on Enter).
+    const swallow = (e) => e.stopPropagation();
+    ['keydown','keypress','keyup','input','beforeinput'].forEach((t) => box.addEventListener(t, swallow, true));
+    ['mousedown','mouseup','click','dblclick'].forEach((t) => box.addEventListener(t, swallow, true));
+    box.addEventListener('mousedown', () => { box.focus(); }, true);
     box.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); const text = box.textContent.trim(); if (!text) return; sendCurrent(text); box.textContent = ''; }
-    });
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); doSend(); }
+    }, true);
+    state.shadow.getElementById('send').addEventListener('click', (e) => { e.stopPropagation(); doSend(); });
+    state.shadow.getElementById('send').addEventListener('mousedown', (e) => e.stopPropagation(), true);
+    state._compose = (text) => { box.focus(); box.textContent = String(text || ''); box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); };
+    state._focusComposer = () => { box.focus(); return document.activeElement === state.overlayHost || !!state.shadow.getElementById('box'); };
     window.addEventListener('resize', positionOverlay);
   }
   function positionOverlay() {
@@ -519,6 +543,10 @@
     open: (id) => openChannel(id),
     close: closeOverlay,
     refresh: async () => refresh(),
+    // drive the real composer path: type text + fire Enter (used for e2e send tests)
+    compose: (text) => (state._compose ? state._compose(text) : null),
+    focusComposer: () => (state._focusComposer ? state._focusComposer() : false),
+    boxText: () => state.shadow?.getElementById('box')?.textContent || '',
     select: (id) => { selectRow(id); },
     deselect,
     capture: () => ({
