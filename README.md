@@ -59,6 +59,12 @@ open -a Slack --args --remote-debugging-port=9222
 node bin/ew-host.mjs --port 9222 --match slack.com
 ```
 
+> **Slack 4.53.x+ note.** Slack added a guard in `app.asar` that refuses
+> `--remote-debugging-port` unless `--user-data-dir` points outside the
+> default profile, so the one-liner above no longer works. The straight-shot
+> setup (copy the auth-relevant profile parts to a sibling dir and launch
+> against the copy) is in **[docs/SETUP-SLACK-CDP.md](docs/SETUP-SLACK-CDP.md)**.
+
 You should see a dark **toolbar** pinned across the top of the Slack window:
 
 - **⚙** — opens the **extensions management panel** (list / enable / disable /
@@ -69,8 +75,11 @@ You should see a dark **toolbar** pinned across the top of the Slack window:
 
 Quit Slack and close the port with:
 ```bash
-pkill -f "Slack.app/Contents/MacOS/Slack"
+pkill -f "bin/ew-host.mjs"            # stop the host
+pkill -f "Slack.app/Contents/MacOS/Slack"   # quit Slack (closes the port)
 ```
+(See [docs/SETUP-SLACK-CDP.md](docs/SETUP-SLACK-CDP.md) for the full cleanup,
+including throwing away the copied debug profile.)
 
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for options, project layout,
 the implemented API surface, the debug-verification procedure, why-not-the-obvious
