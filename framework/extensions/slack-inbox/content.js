@@ -36,7 +36,7 @@
   const SECTION_ID = 'L086AD6NLHZ';        // the "bowei" sidebar section heading
   const FAKE_MARK = 'ew-inbox-fake';        // data-ew attr marking our rows
   const ROW_H = 28;                         // px, Slack sidebar row height
-  const MAX_ROWS = 8;                       // cap on injected discord rows
+  const MAX_ROWS = 14;                      // cap on injected discord rows (bumped from 8 so bot DMs like Carl-bot surface)
   const POLL_MS = 6000;                     // live refresh of the open thread
   const MSG_LIMIT = 50;
   const FAKE_QA = 'channel_sidebar_name_discord';
