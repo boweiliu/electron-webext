@@ -1,77 +1,116 @@
-# Spike: Slack Inbox — a fake cross-platform channel inside Slack
+# Spike: Slack Inbox → real Discord DMs
 
-The first step toward using the real Slack desktop app as a **UI shell for
-cross-platform responsiveness** (email / linkedin / discord), so you can answer
-people outside your team from the workflow you already live in.
+Step 2 of using the real Slack.app as a **UI shell for cross-platform
+responsiveness** (discord / email / linkedin), so you can answer people outside
+your team from the workflow you already live in.
 
-This spike injects a fake **"discord - alice"** channel under the user's "bowei"
-sidebar section and renders a fake conversation in the message pane — all via
-CDP injection (no iframe, no cookie theft, no app repackaging).
+The first spike injected a *fake* "discord - alice" channel + a hardcoded
+conversation. This spike makes the conversation **real**: it pulls your actual
+Discord DMs into the injected Slack channel and sends real replies, all without
+the page ever touching the Discord token.
 
-## What it does
+## Architecture
 
-- **Sidebar:** injects a "discord - alice" row as the first channel under the
-  `bowei` sidebar section. It's a clone of a real channel row (so it inherits
-  Slack's exact styling), renamed and re-stamped with our own `data-qa`.
-- **Message pane:** clicking the fake row overlays a closed-shadow-DOM panel
-  over the message area with a fake conversation (Alice + Bowei). The composer
-  accepts input and appends it to the thread (demo only — not wired to anything).
-  Clicking a real channel, or the × button, hides the overlay.
-- **Harness hooks:** `window.__ewInbox` (in the extension's isolated world)
-  exposes `.capture() / .show() / .hide() / .toggle()` so an e2e/dev harness can
-  read the rendered HTML + structured conversation and drive the overlay.
+```
+ Slack renderer (slack.com, isolated world `ew:<slack-inbox>`)
+   │  content.js
+   │  chrome.discord.listDMs() / .messages(id) / .send(id, text)
+   ▼  (Runtime.addBinding → __ewSend → host backends.discord)
+ electron-webext host (Node, bin/ew-host.mjs)
+   │  backends.discord.*  →  `latchkey curl 'https://discord.com/api/v10/...'`
+   ▼
+ latchkey  (stored `discord` service → injects Authorization header)
+   ▼
+ Discord REST API
+```
 
-## How it survives Slack's React virtualized sidebar
+Key point: the content script runs in `slack.com`'s renderer. It can't reach
+`discord.com` directly (cross-origin + Slack's CSP) and must never see the token.
+So the **host** makes the calls, via `latchkey curl`, where latchkey injects the
+stored `Authorization` header. The extension only ever sees parsed JSON.
 
-The sidebar is a `c-virtual_list__scroll_container`; every row is a
-`[data-qa="virtual-list-item"]` positioned with an absolute `top` (px), height
-28, computed by Slack from the item's index. React owns `top` but does **not**
-touch `transform`. So:
+## Credentials
 
-1. Insert the fake row at `top = (section heading top + 28)`.
-2. Shift every real row at/ below that `top` down by one row-height via
-   `transform: translateY(28px)`. React can rewrite `top` all it wants — our
-   transform persists.
-3. A `MutationObserver` on the scroll container re-inserts the fake row and
-   re-applies the shifts whenever Slack re-renders.
-
-Result: no overlaps, the fake channel reads as the first channel under the
-section, and it survives Slack's re-renders.
-
-## Run it
-
-(Requires the Slack CDP setup from [SETUP-SLACK-CDP.md](SETUP-SLACK-CDP.md) —
-i.e. Slack running with `--remote-debugging-port=9222` and the host attached.)
+The Discord token is provided to **latchkey** (never to the extension). Either:
 
 ```bash
-# start the host (auto-loads every extension under framework/extensions/):
+# user-session token — reads your REAL personal DMs (recommended for the spike)
+latchkey auth browser discord
+
+# bot token — reads the bot's channels / DMs-with-the-bot
+latchkey auth set discord -H "Authorization: Bot <token>"
+```
+
+Verify the data path independently of the Slack UI:
+
+```bash
+node bin/test-discord.mjs                 # status + list DMs + dump first thread
+node bin/test-discord.mjs <channelId> 20  # dump a specific thread
+```
+
+If you run the host but haven't configured creds, the extension automatically
+falls back to the original fake "discord - alice" conversation so the spike still
+renders (the footer reads "fake mode").
+
+## Run it (with the live host)
+
+The shared hackathon host runs from the main worktree and **doesn't have the
+`discord` backend**. To exercise the real wiring, run the host from this
+worktree:
+
+```bash
+# (only one host can attach to Slack's renderer at a time — stop the shared one)
+pkill -f "bin/ew-host.mjs"
+
+# then, from this worktree:
+cd ~/code/electron-webext-n4
 node bin/ew-host.mjs --port 9222 --match slack.com
 ```
 
-You should see "discord - alice" under your bowei section. Click it.
+You should now see one `discord - <name>` row under your bowei sidebar section
+**per real Discord DM** (capped at 8). Click one — the overlay loads the real
+thread from Discord; typing + Enter sends a real message. The thread auto-
+refreshes every 6s.
 
-## Inspect / harness
+> Because the host hot-reloads on file change, edits to
+> `framework/extensions/slack-inbox/content.js` reinject + reload Slack
+> automatically once the worktree host is running.
 
-```bash
-# DOM-level check from the page main world:
-node bin/eval.mjs '() => !!document.querySelector("[data-ew=\"ew-inbox-fake\"]")'
+## Harness hooks (window.__ewInbox)
 
-# read the harness hook from the extension's isolated world:
-node bin/eval.mjs '() => window.__ewInbox.capture()' --world ew:ew1629tr5
-
-# screenshot the rendered Slack window:
-node bin/screenshot.mjs /tmp/slack-inbox.png
+```js
+__ewInbox.status()        // bridge status: { ok, account, bot, latchkey, reason }
+__ewInbox.channels()      // discovered Discord DM channels (or [] in fake mode)
+__ewInbox.open(channelId) // open the overlay on a channel
+__ewInbox.close()         // hide the overlay
+__ewInbox.refresh()       // force refetch the active thread
+__ewInbox.capture()       // { visible, activeId, fakeMode, conversation, conversationHtml }
 ```
 
-(The `--world` name is logged by the host at inject time, e.g.
-`inject build=<hash> ew1629tr5 -> world ew:ew1629tr5`.)
+From the page main world (no extension world needed for these read-only hooks):
+```bash
+node bin/eval.mjs '() => window.__ewInbox.channels()'
+node bin/screenshot.mjs /tmp/discord-in-slack.png
+```
+
+## What changed from spike 1
+
+- `bin/ew-host.mjs` — new `backends.discord` (`status / me / listDMs / messages
+  / send`) backed by `latchkey curl`; token stays host-side.
+- `framework/host/shim.js` — new `chrome.discord` namespace exposed to
+  extensions.
+- `framework/extensions/slack-inbox/content.js` — one row per real DM channel;
+  overlay pulls real messages and sends real replies; live 6s poll; graceful
+  fake fallback when the bridge/creds are unavailable.
+- `bin/test-discord.mjs` — standalone end-to-end check of the latchkey→Discord
+  path (no Slack needed).
 
 ## Next
 
-- Make the conversation real: pull actual Discord DMs (via Discord API or a
-  bridge) into the overlay instead of the fake `CONVERSATION` array.
-- Add more fake channels under the section: one per external source
-  (linkedin / gmail / …), each with its own overlay renderer.
-- Persist state in `chrome.storage.local` (last open thread, unread counts).
+- More sources: gmail / linkedin rows under the section, each with its own
+  bridge + renderer (the `discord` backend is the template).
+- Persist last-open thread + unread counts in `chrome.storage.local`.
 - A screenshot + HTML-capture harness loop so an external e2e driver can assert
   on the rendered cross-platform inbox without a human in the loop.
+- Send-receipt / typing indicators; switch from polling to gateway events
+  (`latchkey` could expose a WS proxy).

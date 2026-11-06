@@ -11,7 +11,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync } from 'child_process';
+import { execFileSync, execFile } from 'child_process';
 import CDP from 'chrome-remote-interface';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -289,7 +289,60 @@ const backends = {
   commands: { getAll: async (ctx) => registry.get(ctx.extId)?.manifest?.commands ? Object.entries(registry.get(ctx.extId).manifest.commands).map(([k,v])=>({name:k,description:v.description,suggested_key:v.suggested_key})) : [] },
   i18n: { getMessage: (_ctx, [n]) => n },
   windows: { getCurrent: async (ctx) => ({ id: ctx.targetId }), getAll: async () => [], create: () => null, update: () => true, remove: () => true },
+
+  // ---- discord bridge (backed by `latchkey curl`) ----
+  // The host runs in Node (not the slack.com page), so it can hold the Discord
+  // Authorization header and call discord.com without CORS / cross-origin / CSP
+  // issues. Credentials come from latchkey's stored `discord` service — either a
+  // user-session token (`latchkey auth browser discord`) or a bot token
+  // (`latchkey auth set discord -H "Authorization: Bot <token>"`). The extension
+  // never sees the token; it only sees parsed JSON.
+  discord: {
+    status: async () => discordStatus(),
+    me: async () => discordGet('/users/@me'),
+    listDMs: async () => discordGet('/users/@me/channels'),
+    messages: async (_ctx, [channelId, limit]) => discordGet(`/channels/${channelId}/messages?limit=${Math.min(Math.max(limit || 50, 1), 100)}`),
+    send: async (_ctx, [channelId, content]) => discordPost(`/channels/${channelId}/messages`, { content: String(content || '') }),
+  },
 };
+
+// ---------- discord / latchkey bridge ----------
+// All Discord calls are made host-side via `latchkey curl`, which injects the
+// stored Authorization header. We deliberately keep the token out of the page.
+const LATCHKEY_BIN = process.env.LATCHKEY_BIN || 'latchkey';
+const DISCORD_API = process.env.DISCORD_API || 'https://discord.com/api/v10';
+let _latchkeyVer = null;
+function latchkeyVersion() {
+  if (_latchkeyVer) return _latchkeyVer;
+  _latchkeyVer = new Promise((res) => execFile(LATCHKEY_BIN, ['--version'], (e, out) => res(e ? null : out.toString().trim())));
+  return _latchkeyVer;
+}
+function latchkeyCurl(args, { method, body } = {}) {
+  const full = ['curl', ...(method ? ['-X', method] : []), ...args];
+  if (body !== undefined) full.push('-H', 'Content-Type: application/json', '-d', typeof body === 'string' ? body : JSON.stringify(body));
+  return new Promise((resolve, reject) => {
+    execFile(LATCHKEY_BIN, full, { maxBuffer: 1 << 24, env: process.env }, (err, stdout, stderr) => {
+      if (err) { reject(new Error('latchkey curl failed: ' + (stderr || err.message).toString().trim())); return; }
+      resolve(stdout);
+    });
+  });
+}
+function parseDiscord(raw, p) {
+  const s = raw.toString();
+  let data; try { data = JSON.parse(s); } catch { throw new Error('discord: non-JSON response for ' + p + ': ' + s.slice(0, 200)); }
+  if (data && typeof data === 'object' && !Array.isArray(data) && data.code != null && data.message) {
+    throw new Error('discord API error (' + data.code + '): ' + data.message);
+  }
+  return data;
+}
+async function discordGet(p) { return parseDiscord(await latchkeyCurl([DISCORD_API + p]), p); }
+async function discordPost(p, body) { return parseDiscord(await latchkeyCurl([DISCORD_API + p], { method: 'POST', body }), p); }
+async function discordStatus() {
+  const ver = await latchkeyVersion();
+  if (!ver) return { ok: false, reason: `latchkey binary not found (LATCHKEY_BIN=${LATCHKEY_BIN})` };
+  try { const me = await discordGet('/users/@me'); return { ok: true, latchkey: ver, account: me.username || me.email || me.id, bot: !!(me.bot || (me.email == null && me.id != null)) }; }
+  catch (e) { return { ok: false, reason: e.message, latchkey: ver }; }
+}
 
 // ---------- reinject (hot reload / enable-disable) ----------
 async function reinjectAll() {
