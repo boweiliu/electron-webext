@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Slack Inbox",
+  "version": "0.1.0",
+  "description": "Spike: inject a fake 'discord - alice' channel under the bowei sidebar section and render a fake conversation in the message pane. First step toward using Slack as a cross-platform inbox shell (email/linkedin/discord) via CDP injection. Exposes window.__ewInbox capture hooks for an e2e dev harness.",
+  "permissions": ["storage"],
+  "content_scripts": [
+    { "matches": ["https://app.slack.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}
