@@ -338,11 +338,23 @@
     const doSend = () => { const text = box.textContent.trim(); if (!text) return; sendCurrent(text); box.textContent = ''; };
     box.addEventListener('focus', () => box.classList.add('focus'));
     box.addEventListener('blur', () => box.classList.remove('focus'));
+    // The composer lives in a closed shadow DOM. Slack's global shortcut handlers
+    // sit on document/window and see our overlay div as the active element (not
+    // their own input), so they'd swallow keystrokes before typing can happen.
+    // Stop these events from propagating out of the composer so Slack never sees
+    // them; the browser's default (typing) is unaffected because we don't
+    // preventDefault (except on Enter).
+    const swallow = (e) => e.stopPropagation();
+    ['keydown','keypress','keyup','input','beforeinput'].forEach((t) => box.addEventListener(t, swallow, true));
+    ['mousedown','mouseup','click','dblclick'].forEach((t) => box.addEventListener(t, swallow, true));
+    box.addEventListener('mousedown', () => { box.focus(); }, true);
     box.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
-    });
-    state.shadow.getElementById('send').addEventListener('click', doSend);
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); doSend(); }
+    }, true);
+    state.shadow.getElementById('send').addEventListener('click', (e) => { e.stopPropagation(); doSend(); });
+    state.shadow.getElementById('send').addEventListener('mousedown', (e) => e.stopPropagation(), true);
     state._compose = (text) => { box.focus(); box.textContent = String(text || ''); box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); };
+    state._focusComposer = () => { box.focus(); return document.activeElement === state.overlayHost || !!state.shadow.getElementById('box'); };
     window.addEventListener('resize', positionOverlay);
   }
   function positionOverlay() {
@@ -533,6 +545,8 @@
     refresh: async () => refresh(),
     // drive the real composer path: type text + fire Enter (used for e2e send tests)
     compose: (text) => (state._compose ? state._compose(text) : null),
+    focusComposer: () => (state._focusComposer ? state._focusComposer() : false),
+    boxText: () => state.shadow?.getElementById('box')?.textContent || '',
     select: (id) => { selectRow(id); },
     deselect,
     capture: () => ({
